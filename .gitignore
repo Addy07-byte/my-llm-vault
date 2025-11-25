@@ -1,0 +1,23 @@
+# Environment variables (keep API keys private)
+.env
+
+# Knowledge base (personal embeddings)
+kb.json
+
+# Personal data folders
+resume_single_test/
+resumes/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments (if any)
+venv/
+rag project/
+
+# Editor / OS junk
+.DS_Store
+Thumbs.db
+.vscode/
