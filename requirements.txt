@@ -1,0 +1,6 @@
+openai>=1.0.0
+numpy
+PyPDF2
+python-dotenv
+python-docx>=0.8.11
+fastapi
