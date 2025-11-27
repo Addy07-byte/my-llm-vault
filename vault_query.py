@@ -45,6 +45,12 @@ def refine_query(query: str, history: list) -> str:
     if not history:
         return query
         
+    # 1. Format history into a clean, readable string 🧹
+    formatted_history = "\n".join(
+        f"{message['role'].capitalize()}: {message['content']}"
+        for message in history
+    )
+    
     system_prompt = (
         "You are a helpful assistant that specializes in query refinement and query compression. "
         "Your task is to analyze the provided conversation history and the latest user query. "
@@ -52,18 +58,17 @@ def refine_query(query: str, history: list) -> str:
         "that contains all necessary context. Respond only with the refined query and nothing else."
     )
     
-    # We construct the input for the LLM to perform the refinement
+    # 2. Construct the user input with the clean history
     user_content = (
-        f"Conversation history:\n{history}\n\n"
-        f"Original user query: {query}"
+        f"--- CONVERSATION HISTORY ---\n{formatted_history}\n"
+        f"--- LATEST USER QUERY ---\n{query}\n\n"
+        f"REFINED SEARCH QUERY:"
     )
 
-    # Note: We can reuse the call_llm function, but we pass an empty history=[]
-    # for this call, as the refinement query should be short and not itself
-    # require RAG or a long conversation history.
+    # Call LLM to get the refined query
+    # We pass an empty history=[] for this call as the refinement itself is stateless.
     refined_query = call_llm(user_content, system_prompt=system_prompt, history=[])
     
-    # The LLM may return the original query if it was clear enough
     return refined_query.strip()
 
 def search_kb(query: str, kb: list, top_k: int = TOP_K):
