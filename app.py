@@ -13,6 +13,7 @@ kb = load_kb(KB_PATH)
 
 class Query(BaseModel):
     question: str
+    history: list=[]
 
 class JDRequest(BaseModel):
     jd_text:str
