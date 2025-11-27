@@ -39,6 +39,33 @@ def embed_query(query: str):
     )
     return resp.data[0].embedding
 
+
+def refine_query(query: str, history: list) -> str:
+    # If there is no history, no refinement is needed
+    if not history:
+        return query
+        
+    system_prompt = (
+        "You are a helpful assistant that specializes in query refinement and query compression. "
+        "Your task is to analyze the provided conversation history and the latest user query. "
+        "Based on the history, rewrite the user's query into a single, clear, standalone search query "
+        "that contains all necessary context. Respond only with the refined query and nothing else."
+    )
+    
+    # We construct the input for the LLM to perform the refinement
+    user_content = (
+        f"Conversation history:\n{history}\n\n"
+        f"Original user query: {query}"
+    )
+
+    # Note: We can reuse the call_llm function, but we pass an empty history=[]
+    # for this call, as the refinement query should be short and not itself
+    # require RAG or a long conversation history.
+    refined_query = call_llm(user_content, system_prompt=system_prompt, history=[])
+    
+    # The LLM may return the original query if it was clear enough
+    return refined_query.strip()
+
 def search_kb(query: str, kb: list, top_k: int = TOP_K):
     q_emb = embed_query(query)
     scored = []
@@ -49,21 +76,26 @@ def search_kb(query: str, kb: list, top_k: int = TOP_K):
     return scored[:top_k]
 
 def answer_with_vault(query: str, kb: list, history: list =[]):
-    top = search_kb(query, kb, TOP_K)
-
-    # 1. IMPLEMENT SLIDING WINDOW HERE
+    
+    # 1. Sliding Window (Memory Management) 🪟
     if len(history) > 10:
         history = history[-10:]
+        
+    # 2. Query Refinement (Fixes RAG context loss) 🧠
+    refined_query = refine_query(query, history)
+    
+    # 3. RAG Search (Uses the new, clear query)
+    top = search_kb(refined_query, kb, TOP_K) 
 
+    # If no data is found at all, fall back to generic LLM
     if not top:
-        # no data at all, just fall back to generic
         return call_llm(query, system_prompt="You are a helpful assistant.", history=history)
 
     best_sim, _ = top[0]
-    print(f"\n🔎 Best similarity score: {best_sim:.2f}")
+    print(f"\n🔎 Best similarity score: {best_sim:.2f} (from refined query: {refined_query})")
 
     if best_sim >= SIM_THRESHOLD:
-        # Use personal context
+        # Use personal context (RAG)
         context_chunks = [rec["text"] for _, rec in top]
         context = "\n\n---\n\n".join(context_chunks)
         system = (
@@ -71,6 +103,7 @@ def answer_with_vault(query: str, kb: list, history: list =[]):
             "Answer using ONLY the provided personal context. "
             "If something is not in the context, say you don't know."
         )
+        # We use the ORIGINAL query in the prompt, since the LLM already knows the context from the history.
         user_content = (
             f"Context from Adi's vault:\n{context}\n\n"
             f"Question: {query}"
@@ -80,6 +113,7 @@ def answer_with_vault(query: str, kb: list, history: list =[]):
         system = "You are a helpful assistant."
         user_content = query
 
+    # Both paths pass the full history to the LLM for conversation context
     return call_llm(user_content, system_prompt=system, history=history)
 
 def call_llm(user_content: str, system_prompt: str, history: list = []):
