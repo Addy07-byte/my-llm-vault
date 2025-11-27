@@ -51,6 +51,10 @@ def search_kb(query: str, kb: list, top_k: int = TOP_K):
 def answer_with_vault(query: str, kb: list, history: list =[]):
     top = search_kb(query, kb, TOP_K)
 
+    # 1. IMPLEMENT SLIDING WINDOW HERE
+    if len(history) > 10:
+        history = history[-10:]
+
     if not top:
         # no data at all, just fall back to generic
         return call_llm(query, system_prompt="You are a helpful assistant.", history=history)
