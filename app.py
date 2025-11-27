@@ -20,7 +20,7 @@ class JDRequest(BaseModel):
 
 @app.post("/query")
 def query_endpoint(q: Query):
-    answer = answer_with_vault(q.question, kb)
+    answer = answer_with_vault(q.question, kb, q.history )
     return {"answer": answer}
 
 @app.post("/jd-gap-analysis")

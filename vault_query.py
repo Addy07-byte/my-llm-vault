@@ -48,12 +48,12 @@ def search_kb(query: str, kb: list, top_k: int = TOP_K):
     scored.sort(key=lambda x: x[0], reverse=True)
     return scored[:top_k]
 
-def answer_with_vault(query: str, kb: list):
+def answer_with_vault(query: str, kb: list, history: list =[]):
     top = search_kb(query, kb, TOP_K)
 
     if not top:
         # no data at all, just fall back to generic
-        return call_llm(query, system_prompt="You are a helpful assistant.")
+        return call_llm(query, system_prompt="You are a helpful assistant.", history=history)
 
     best_sim, _ = top[0]
     print(f"\n🔎 Best similarity score: {best_sim:.2f}")
@@ -76,15 +76,25 @@ def answer_with_vault(query: str, kb: list):
         system = "You are a helpful assistant."
         user_content = query
 
-    return call_llm(user_content, system_prompt=system)
+    return call_llm(user_content, system_prompt=system, history=history)
 
-def call_llm(user_content: str, system_prompt: str):
+def call_llm(user_content: str, system_prompt: str, history: list = []):
+    
+    # 1. Start the messages list with the System Prompt (always first)
+    messages = [
+        {"role": "system", "content": system_prompt}
+    ]
+    
+    # 2. Add the conversation history
+    messages += history # This adds all previous Q&A turns
+    
+    # 3. Add the new User Message (always last)
+    messages.append({"role": "user", "content": user_content})
+
+    # Now, pass the complete list to the API
     resp = client.chat.completions.create(
         model=CHAT_MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ]
+        messages=messages # <--- The key change!
     )
     return resp.choices[0].message.content.strip()
 
