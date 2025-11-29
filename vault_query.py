@@ -45,7 +45,7 @@ def refine_query(query: str, history: list) -> str:
     if not history:
         return query
         
-    # 1. Format history into a clean, readable string 🧹
+    # 1. Format history into a clean, readable string
     formatted_history = "\n".join(
         f"{message['role'].capitalize()}: {message['content']}"
         for message in history
@@ -66,7 +66,6 @@ def refine_query(query: str, history: list) -> str:
     )
 
     # Call LLM to get the refined query
-    # We pass an empty history=[] for this call as the refinement itself is stateless.
     refined_query = call_llm(user_content, system_prompt=system_prompt, history=[])
     
     return refined_query.strip()
@@ -145,15 +144,23 @@ def main():
     kb = load_kb(KB_PATH)
     print(f"Loaded {len(kb)} chunks from {KB_PATH}\n")
 
+    # 1. Initialize the memory list
+    conversation_history = [] 
+
     while True:
         try:
             query = input("\nAsk LLM Vault (or type 'exit'): ").strip()
             if query.lower() in ("exit", "quit"):
                 break
 
-            answer = answer_with_vault(query, kb)
+            # 2. Pass the history list to the function
+            answer = answer_with_vault(query, kb, history=conversation_history) 
             print("\n--- ANSWER ---")
             print(answer)
+            
+            # 3. Update the history list
+            conversation_history.append({"role": "user", "content": query})
+            conversation_history.append({"role": "assistant", "content": answer})
 
         except KeyboardInterrupt:
             break
@@ -200,4 +207,4 @@ def jd_gap_analysis(jd_text: str, kb: list, top_k: int = 10) -> str:
 
 
 if __name__ == "__main__":
-    main()
+    main
