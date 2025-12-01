@@ -153,12 +153,12 @@ def main():
             if query.lower() in ("exit", "quit"):
                 break
 
-            # 2. Pass the history list to the function
+            # 2. Pass the history list
             answer = answer_with_vault(query, kb, history=conversation_history) 
             print("\n--- ANSWER ---")
             print(answer)
             
-            # 3. Update the history list
+            # 3. Update the history list after the response
             conversation_history.append({"role": "user", "content": query})
             conversation_history.append({"role": "assistant", "content": answer})
 
