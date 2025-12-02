@@ -207,4 +207,4 @@ def jd_gap_analysis(jd_text: str, kb: list, top_k: int = 10) -> str:
 
 
 if __name__ == "__main__":
-    main
+    main()
