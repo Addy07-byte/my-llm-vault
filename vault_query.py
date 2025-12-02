@@ -99,19 +99,30 @@ def answer_with_vault(query: str, kb: list, history: list =[]):
     print(f"\n🔎 Best similarity score: {best_sim:.2f} (from refined query: {refined_query})")
 
     if best_sim >= SIM_THRESHOLD:
-        # Use personal context (RAG)
-        context_chunks = [rec["text"] for _, rec in top]
-        context = "\n\n---\n\n".join(context_chunks)
+        # Build context with RESUME_FILE so the model knows which chunk belongs to which resume
+        context_chunks = []
+        for sim, rec in top:
+            fname = rec.get("metadata" , {}).get("filename", "unknown_file")
+            chunk_text = rec["text"]
+            context_chunks.append(f"RESUME_FILE: {fname}\nSIMILARITY: {sim:.2f}\nCONTENT:\n{chunk_text}")
+
+        context = "\n\n ---\n\n".join(context_chunks)
+
+        #New system prompt: choose the single best resume
         system = (
-            "You are Adi's personal assistant. "
-            "Answer using ONLY the provided personal context. "
-            "If something is not in the context, say you don't know."
+            "You are Adi's personal AI career assistant.\n"
+            "You are given snippets from multiple resumes. Each snippet is tagged with RESUME_FILE.\n"
+            "Using ONLY this context and the user's job description or request, choose the single BEST matching resume.\n"
+            "Respond with the resume file name and a one-line reason.\n"
+            "If you truly cannot decide, pick the closest one and say why."
         )
-        # We use the ORIGINAL query in the prompt, since the LLM already knows the context from the history.
+
         user_content = (
-            f"Context from Adi's vault:\n{context}\n\n"
-            f"Question: {query}"
+            f"Here are resume snippets from Adi's vault:\n{context}\n\n"
+            f"Job description or question:\n{query}\n\n"
+            "Which RESUME_FILE is the best match, and why?"
         )
+         
     else:
         # Fall back to general LLM
         system = "You are a helpful assistant."
