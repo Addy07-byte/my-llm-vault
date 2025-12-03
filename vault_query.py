@@ -99,37 +99,39 @@ def answer_with_vault(query: str, kb: list, history: list =[]):
     print(f"\n🔎 Best similarity score: {best_sim:.2f} (from refined query: {refined_query})")
 
     if best_sim >= SIM_THRESHOLD:
-        # Build context with RESUME_FILE so the model knows which chunk belongs to which resume
+        # 🔹 RAG branch (existing behavior)
+        # Use personal context (RAG)
         context_chunks = []
         for sim, rec in top:
-            fname = rec.get("metadata" , {}).get("filename", "unknown_file")
+            fname = rec.get("metadata", {}).get("filename", "unknown_file")
             chunk_text = rec["text"]
-            context_chunks.append(f"RESUME_FILE: {fname}\nSIMILARITY: {sim:.2f}\nCONTENT:\n{chunk_text}")
+            context_chunks.append(
+                f"RESUME_FILE: {fname}\nSIMILARITY: {sim:.2f}\nCONTENT:\n{chunk_text}"
+            )
 
-        context = "\n\n ---\n\n".join(context_chunks)
+        context = "\n\n---\n\n".join(context_chunks)
 
-        #New system prompt: choose the single best resume
         system = (
             "You are Adi's personal AI career assistant.\n"
             "You are given snippets from multiple resumes. Each snippet is tagged with RESUME_FILE.\n"
             "Using ONLY this context and the user's job description or request, choose the single BEST matching resume.\n"
-            "Respond with the resume file name and a one-line reason.\n"
-            "If you truly cannot decide, pick the closest one and say why."
+            "Respond ONLY with the resume file name (e.g., Resume_AH.pdf)."
         )
 
         user_content = (
             f"Here are resume snippets from Adi's vault:\n{context}\n\n"
             f"Job description or question:\n{query}\n\n"
-            "Which RESUME_FILE is the best match, and why?"
+            "Which RESUME_FILE is the best match?"
         )
-         
-    else:
-        # Fall back to general LLM
-        system = "You are a helpful assistant."
-        user_content = query
 
-    # Both paths pass the full history to the LLM for conversation context
-    return call_llm(user_content, system_prompt=system, history=history)
+        answer = call_llm(user_content, system_prompt=system, history=history)
+        return answer  # (later you can hook this into 'display content' like we discussed)
+
+    else:
+        # 🔄 Fallback: generate a new resume grounded in your vault
+        generated_resume = generate_resume_from_vault(query, kb)
+        return generated_resume
+
 
 def call_llm(user_content: str, system_prompt: str, history: list = []):
     
@@ -150,6 +152,55 @@ def call_llm(user_content: str, system_prompt: str, history: list = []):
         messages=messages # <--- The key change!
     )
     return resp.choices[0].message.content.strip()
+
+def generate_resume_from_vault(jd_text: str, kb: list, top_k: int = 40) -> str:
+    """
+    Try to generate a tailored resume based on Adi's existing context + the job description.
+    Ground everything in the KB. Do NOT invent experience that isn't there.
+    """
+
+    # 1. Use the same semantic search to pull relevant chunks from your vault
+    top = search_kb(jd_text, kb, top_k=top_k)
+    if not top:
+        return (
+            "I don't have enough information in your vault to create an honest resume "
+            "for this job. Please enrich your KB with more projects/experience first."
+        )
+
+    context_chunks = [rec["text"] for sim, rec in top]
+    context = "\n\n-----\n\n".join(context_chunks)
+
+    system_prompt = (
+        "You are Adi's personal AI career assistant.\n"
+        "You are given:\n"
+        "- A job description\n"
+        "- Adi's existing resume and project context from his personal vault\n\n"
+        "Your task:\n"
+        "1. If there is enough relevant information, WRITE a tailored resume for this job.\n"
+        "   - Use ONLY skills, tools, projects, and experience that appear in the candidate context.\n"
+        "   - Do NOT invent companies, roles, or technologies.\n"
+        "   - It's okay to reword and reorganize, but stay faithful to the underlying facts.\n"
+        "   - Format the answer as a resume (Summary, Skills, Experience, Projects, Education, etc.).\n"
+        "2. If there is clearly not enough relevant experience in the context, DO NOT make things up.\n"
+        "   Instead, say: 'I don't have enough real experience in your vault to generate an honest resume for this role.'\n"
+    )
+
+    user_prompt = (
+        f"JOB DESCRIPTION:\n{jd_text}\n\n"
+        f"CANDIDATE CONTEXT FROM VAULT:\n{context}"
+    )
+
+    response = client.chat.completions.create(
+        model=CHAT_MODEL,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=0.3,
+    )
+
+    return response.choices[0].message.content.strip()
+
 
 def main():
     kb = load_kb(KB_PATH)
