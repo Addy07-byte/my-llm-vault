@@ -10,7 +10,7 @@ KB_PATH = Path("kb.json")
 EMBED_MODEL = "text-embedding-3-small"
 CHAT_MODEL = "gpt-4o-mini"  # or another chat model you have access to
 TOP_K = 5
-SIM_THRESHOLD = 0.90  # tune this
+SIM_THRESHOLD = 0.60  # tune this
 # ---------------------------------
 
 # load API key from env
