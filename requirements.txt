@@ -4,3 +4,4 @@ PyPDF2
 python-dotenv
 python-docx>=0.8.11
 fastapi
+re
