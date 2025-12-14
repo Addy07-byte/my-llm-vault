@@ -2,11 +2,13 @@
   {
     "id": "firstignite_fullstack",
     "jd": "Full Stack Developer / AI Software Engineer ...",
-    "relevant_resumes": ["Unanet_Resume_Aditya Hede.docx"]
+    "relevant_resumes": ["Unanet_Resume_Aditya Hede.docx"],
+    "expected_behavior": "pick_existing_resume"
   },
   {
     "id": "cloo_devops",
     "jd": "DevOps / Cloud Engineer ...",
-    "relevant_resumes": ["Talkiatry_Resume_Aditya Hede.docx"]
+    "relevant_resumes": ["Talkiatry_Resume_Aditya Hede.docx"],
+    "expected_behavior": "pick_existing_resume"
   }
 ]
