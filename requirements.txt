@@ -1,7 +1,6 @@
-openai>=1.0.0
-numpy
-PyPDF2
+openai
+pypdf2
 python-dotenv
-python-docx>=0.8.11
+python-docx
+numpy
 fastapi
-re
