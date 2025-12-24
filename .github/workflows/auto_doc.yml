@@ -24,5 +24,6 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add SYSTEM_OVERVIEW.md
-          git commit -m "docs: auto-update system overview" || exit 0
-          git push
+          # The '|| true' prevents the error if there is nothing new to commit
+          git commit -m "docs: auto-update system overview" || true 
+          git push || true
