@@ -14,7 +14,7 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 DATA_DIR = Path("resumes")   #pointing to resumes folder
 OUTPUT_FILE = "kb.json"
 EMBED_MODEL = "text-embedding-3-small"
-CHUNK_SIZE = 400  # characters per chunk (tune later)
+CHUNK_SIZE = 450  # characters per chunk (tune later)
 # ---------------------------------
 
 def extract_text_from_file(file_path: Path) -> str:
