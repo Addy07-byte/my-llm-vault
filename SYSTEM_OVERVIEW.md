@@ -3,9 +3,9 @@
 *Auto-generated Status Report*
 
 ## 🛠 Project Configuration
-- **Module 4 (LLM):** Using `gpt-4o-mini"  # or another chat model you have access to`
+- **Module 4 (LLM):** Using `gpt-4o-mini`
 - **Module 3 (Vector DB):** `text-embedding-3-small` with `450  # characters per chunk (tune later)` char chunks
-- **Retrieval Logic:** Cosine Similarity (Threshold: `0.60  # tune this`)
+- **Retrieval Logic:** Cosine Similarity (Threshold: `0.60 `)
 
 ## 📚 Study Mapping (From Handwritten Notes)
 | Module | Topic | Status | Note Reference |
