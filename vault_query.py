@@ -8,67 +8,54 @@ from openai import OpenAI
 # ------------- CONFIG -------------
 KB_PATH = Path("kb.json")
 EMBED_MODEL = "text-embedding-3-small"
-CHAT_MODEL = "gpt-4o-mini"  # or another chat model you have access to
+CHAT_MODEL = "gpt-4o-mini"
 TOP_K = 5
-SIM_THRESHOLD = 0.60  # tune this
+SIM_THRESHOLD = 0.60 
 # ---------------------------------
 
-# load API key from env
-load_dotenv() 
+load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-def load_kb(path: Path):
-    if not path.exists():
-        raise FileNotFoundError(f"{path} not found. Run build_kb.py first.")
-    with path.open("r", encoding="utf-8") as f:
-        return json.load(f)
+# Global KB Cache (so we don't reload it every single query)
+_KB_CACHE = None
+
+def get_kb():
+    """Singleton to load KB only once."""
+    global _KB_CACHE
+    if _KB_CACHE is None:
+        if not KB_PATH.exists():
+            raise FileNotFoundError(f"{KB_PATH} not found. Run build_kb.py first.")
+        with KB_PATH.open("r", encoding="utf-8") as f:
+            _KB_CACHE = json.load(f)
+    return _KB_CACHE
 
 def cosine_similarity(a, b):
-    # assumes len(a) == len(b)
     dot = sum(x * y for x, y in zip(a, b))
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(y * y for y in b))
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot / (norm_a * norm_b)
+    return dot / (norm_a * norm_b) if norm_a and norm_b else 0.0
 
 def embed_query(query: str):
-    resp = client.embeddings.create(
-        model=EMBED_MODEL,
-        input=query
-    )
+    resp = client.embeddings.create(model=EMBED_MODEL, input=query)
     return resp.data[0].embedding
 
-
 def refine_query(query: str, history: list) -> str:
-    # If there is no history, no refinement is needed
     if not history:
         return query
-        
-    # 1. Format history into a clean, readable string
-    formatted_history = "\n".join(
-        f"{message['role'].capitalize()}: {message['content']}"
-        for message in history
-    )
     
-    system_prompt = (
-        "You are a helpful assistant that specializes in query refinement and query compression. "
-        "Your task is to analyze the provided conversation history and the latest user query. "
-        "Based on the history, rewrite the user's query into a single, clear, standalone search query "
-        "that contains all necessary context. Respond only with the refined query and nothing else."
-    )
+    formatted_history = "\n".join([f"{m['role'].capitalize()}: {m['content']}" for m in history[-6:]])
+    system_prompt = "Refine the user's query into a single, standalone search query based on history."
     
-    # 2. Construct the user input with the clean history
-    user_content = (
-        f"--- CONVERSATION HISTORY ---\n{formatted_history}\n"
-        f"--- LATEST USER QUERY ---\n{query}\n\n"
-        f"REFINED SEARCH QUERY:"
-    )
-
-    # Call LLM to get the refined query
-    refined_query = call_llm(user_content, system_prompt=system_prompt, history=[])
+    user_content = f"HISTORY:\n{formatted_history}\n\nQUERY:\n{query}\n\nREFINED QUERY:"
     
-    return refined_query.strip()
+    resp = client.chat.completions.create(
+        model=CHAT_MODEL,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content}
+        ]
+    )
+    return resp.choices[0].message.content.strip()
 
 def search_kb(query: str, kb: list, top_k: int = TOP_K):
     q_emb = embed_query(query)
@@ -79,194 +66,87 @@ def search_kb(query: str, kb: list, top_k: int = TOP_K):
     scored.sort(key=lambda x: x[0], reverse=True)
     return scored[:top_k]
 
-def answer_with_vault(query: str, kb: list, history: list =[]):
+# --- MAIN LOGIC FUNCTION (Used by Test Script) ---
+def query_vault(user_input: str, history: list = []):
+    """
+    The main brain. Takes a question, returns (answer, relevant_context).
+    """
+    kb = get_kb()
     
-    # 1. Sliding Window (Memory Management) 🪟
-    if len(history) > 10:
-        history = history[-10:]
-        
-    # 2. Query Refinement (Fixes RAG context loss) 🧠
-    refined_query = refine_query(query, history)
+    # 1. Refine Query
+    refined_query = refine_query(user_input, history)
     
-    # 3. RAG Search (Uses the new, clear query)
-    top = search_kb(refined_query, kb, TOP_K) 
-
-    # If no data is found at all, fall back to generic LLM
-    if not top:
-        return call_llm(query, system_prompt="You are a helpful assistant.", history=history)
-
-    best_sim, _ = top[0]
-    print(f"\n🔎 Best similarity score: {best_sim:.2f} (from refined query: {refined_query})")
-
+    # 2. Search KB
+    top_results = search_kb(refined_query, kb, TOP_K)
+    
+    if not top_results:
+        # Fallback if KB empty
+        return "No relevant data found in vault.", []
+    
+    best_sim, _ = top_results[0]
+    
+    # 3. Decision Gate
+    relevant_context = []
     if best_sim >= SIM_THRESHOLD:
-        # 🔹 RAG branch (existing behavior)
-        # Use personal context (RAG)
+        # RAG Mode
         context_chunks = []
-        for sim, rec in top:
-            fname = rec.get("metadata", {}).get("filename", "unknown_file")
-            chunk_text = rec["text"]
-            context_chunks.append(
-                f"RESUME_FILE: {fname}\nSIMILARITY: {sim:.2f}\nCONTENT:\n{chunk_text}"
-            )
-
-        context = "\n\n---\n\n".join(context_chunks)
-
-        system = (
-            "You are Adi's personal AI career assistant.\n"
-            "You are given snippets from multiple resumes. Each snippet is tagged with RESUME_FILE.\n"
-            "Using ONLY this context and the user's job description or request, choose the single BEST matching resume.\n"
-            "Respond ONLY with the resume file name (e.g., Resume_AH.pdf)."
+        for sim, rec in top_results:
+            fname = rec.get("metadata", {}).get("filename", "unknown")
+            text = rec["text"]
+            context_chunks.append(f"SOURCE: {fname} (Score: {sim:.2f})\n{text}")
+            relevant_context.append(rec)
+            
+        joined_context = "\n\n---\n\n".join(context_chunks)
+        
+        system_prompt = (
+            "You are an expert Resume Assistant. Use the provided context to answer the question.\n"
+            "If the answer isn't in the context, say so."
         )
-
-        user_content = (
-            f"Here are resume snippets from Adi's vault:\n{context}\n\n"
-            f"Job description or question:\n{query}\n\n"
-            "Which RESUME_FILE is the best match?"
+        user_prompt = f"CONTEXT:\n{joined_context}\n\nQUESTION:\n{user_input}"
+        
+        resp = client.chat.completions.create(
+            model=CHAT_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ]
         )
-
-        answer = call_llm(user_content, system_prompt=system, history=history)
-        return answer  # (later you can hook this into 'display content' like we discussed)
-
+        answer = resp.choices[0].message.content.strip()
+        
     else:
-        # 🔄 Fallback: generate a new resume grounded in your vault
-        generated_resume = generate_resume_from_vault(query, kb)
-        return generated_resume
-
-
-def call_llm(user_content: str, system_prompt: str, history: list = []):
-    
-    # 1. Start the messages list with the System Prompt (always first)
-    messages = [
-        {"role": "system", "content": system_prompt}
-    ]
-    
-    # 2. Add the conversation history
-    messages += history # This adds all previous Q&A turns
-    
-    # 3. Add the new User Message (always last)
-    messages.append({"role": "user", "content": user_content})
-
-    # Now, pass the complete list to the API
-    resp = client.chat.completions.create(
-        model=CHAT_MODEL,
-        messages=messages # <--- The key change!
-    )
-    return resp.choices[0].message.content.strip()
-
-def generate_resume_from_vault(jd_text: str, kb: list, top_k: int = 40) -> str:
-    """
-    Try to generate a tailored resume based on Adi's existing context + the job description.
-    Ground everything in the KB. Do NOT invent experience that isn't there.
-    """
-
-    # 1. Use the same semantic search to pull relevant chunks from your vault
-    top = search_kb(jd_text, kb, top_k=top_k)
-    if not top:
-        return (
-            "I don't have enough information in your vault to create an honest resume "
-            "for this job. Please enrich your KB with more projects/experience first."
+        # Fallback Mode (General Chat)
+        relevant_context = []
+        resp = client.chat.completions.create(
+            model=CHAT_MODEL,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": user_input}
+            ]
         )
+        answer = resp.choices[0].message.content.strip()
+        
+    return answer, relevant_context
 
-    context_chunks = [rec["text"] for sim, rec in top]
-    context = "\n\n-----\n\n".join(context_chunks)
-
-    system_prompt = (
-        "You are Adi's personal AI career assistant.\n"
-        "You are given:\n"
-        "- A job description\n"
-        "- Adi's existing resume and project context from his personal vault\n\n"
-        "Your task:\n"
-        "1. If there is enough relevant information, WRITE a tailored resume for this job.\n"
-        "   - Use ONLY skills, tools, projects, and experience that appear in the candidate context.\n"
-        "   - Do NOT invent companies, roles, or technologies.\n"
-        "   - It's okay to reword and reorganize, but stay faithful to the underlying facts.\n"
-        "   - Format the answer as a resume (Summary, Skills, Experience, Projects, Education, etc.).\n"
-        "2. If there is clearly not enough relevant experience in the context, DO NOT make things up.\n"
-        "   Instead, say: 'I don't have enough real experience in your vault to generate an honest resume for this role.'\n"
-    )
-
-    user_prompt = (
-        f"JOB DESCRIPTION:\n{jd_text}\n\n"
-        f"CANDIDATE CONTEXT FROM VAULT:\n{context}"
-    )
-
-    response = client.chat.completions.create(
-        model=CHAT_MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=0.3,
-    )
-
-    return response.choices[0].message.content.strip()
-
-
-def main():
-    kb = load_kb(KB_PATH)
-    print(f"Loaded {len(kb)} chunks from {KB_PATH}\n")
-
-    # 1. Initialize the memory list
-    conversation_history = [] 
-
+# --- CLI ENTRY POINT (Used when you type 'python vault_query.py') ---
+if __name__ == "__main__":
+    print(f"Loaded {len(get_kb())} chunks. Ask me anything (or 'exit').")
+    history = []
+    
     while True:
         try:
-            query = input("\nAsk LLM Vault (or type 'exit'): ").strip()
-            if query.lower() in ("exit", "quit"):
+            user_in = input("\n>> ")
+            if user_in.lower() in ('exit', 'quit'):
                 break
-
-            # 2. Pass the history list
-            answer = answer_with_vault(query, kb, history=conversation_history) 
-            print("\n--- ANSWER ---")
-            print(answer)
             
-            # 3. Update the history list after the response
-            conversation_history.append({"role": "user", "content": query})
-            conversation_history.append({"role": "assistant", "content": answer})
-
+            # Call the unified function
+            ans, ctx = query_vault(user_in, history)
+            
+            print(f"\n--- ANSWER ---\n{ans}")
+            
+            # Update History
+            history.append({"role": "user", "content": user_in})
+            history.append({"role": "assistant", "content": ans})
+            
         except KeyboardInterrupt:
+            print("\nExiting...")
             break
-
-def jd_gap_analysis(jd_text: str, kb: list, top_k: int = 10) -> str:
-    """
-    Compare a job description against Aditya's KB.
-    Return a structured gap analysis.
-    """
-    top = search_kb(jd_text, kb, top_k=top_k)
-    if not top:
-        return "I couldn't find any relevant information in the knowledge base to compare with this job description."
-
-    context_chunks = [rec["text"] for sim, rec in top]
-    context = "\n\n-----\n\n".join(context_chunks)
-
-    system_prompt = (
-        "You are a careful career assistant. Compare the job description with the "
-        "candidate's resume context. DO NOT invent skills. Your output must identify:\n"
-        "1. Key JD skills & responsibilities.\n"
-        "2. Candidate's matching skills from context.\n"
-        "3. Missing or weak areas.\n"
-        "4. Fit score (0–100).\n"
-        "5. Role suggestions.\n"
-        "Be truthful and grounded ONLY in the provided candidate context."
-    )
-
-    user_prompt = (
-        f"JOB DESCRIPTION:\n{jd_text}\n\n"
-        f"CANDIDATE RESUME CONTEXT:\n{context}"
-    )
-
-    #  CORRECT: Use the 'client' object defined at the top of the file
-    response = client.chat.completions.create(
-        model="gpt-4o-mini", # or CHAT_MODEL variable
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user",    "content": user_prompt},
-        ],
-        temperature=0.2,
-    )
-
-    return response.choices[0].message.content
-
-
-if __name__ == "__main__":
-    main()
